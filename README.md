@@ -40,10 +40,15 @@ If you have used RTide for a usecase which is not already covered in the example
 # Citing RTide
 Bibtex:
 ```
-@article{monahan2023response,
-  title={Response Framework: Tidal analysis and prediction through physics-informed ML},
-  author={Monahan, Thomas and Tang, Tianning and Roberts, Stephen and Adcock, Thomas},
-  year={2023}
+@article{monahan2025rtide,
+  title={RTide: Automating the tidal response method},
+  author={Monahan, Thomas and Tang, Tianning and Roberts, Stephen and Adcock, Thomas AA},
+  journal={Journal of Geophysical Research: Machine Learning and Computation},
+  volume={2},
+  number={2},
+  pages={e2024JH000525},
+  year={2025},
+  publisher={Wiley Online Library}
 }
 ```
 
