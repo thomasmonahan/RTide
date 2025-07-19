@@ -51,6 +51,8 @@ Bibtex:
   publisher={Wiley Online Library}
 }
 ```
+# Commercialization Details:
+Commercial use requires a paid license. See LICENSE for details. Questions can be emailed to thomas.monahan@eng.ox.ac.uk
 
 # Useful Response Method References
 [1] Munk, Walter Heinrich, and David Edgar Cartwright. "Tidal spectroscopy and prediction." Philosophical Transactions of the Royal Society of London. Series A, Mathematical and Physical Sciences 259.1105 (1966): 533-581.
