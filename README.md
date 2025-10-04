@@ -1,5 +1,5 @@
 # RTide
-A Python implementation of the framework for [Automating the tidal response methodL](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2024JH000525). The method is an extension of the response method created by Munk and Cartwright in: 'Tidal Spectroscopy and Prediction'. RTide can be used for conventional tidal analysis and prediction, and is well suited to problems involving non-stationary contamination such as tidal rivers, and meteorological forcing. 
+A Python implementation of the framework for [Automating the tidal response method](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2024JH000525). The method is an extension of the response method created by Munk and Cartwright in: 'Tidal Spectroscopy and Prediction'. RTide can be used for conventional tidal analysis and prediction, and is well suited to problems involving non-stationary contamination such as tidal rivers, and meteorological forcing. 
 
 # Installation
 ```
