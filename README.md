@@ -51,6 +51,18 @@ Bibtex:
   publisher={Wiley Online Library}
 }
 ```
+```
+@article{monahan2025response,
+  title={Response-based prediction of tidal currents},
+  author={Monahan, Thomas and Tang, Tianning and Roberts, Stephen and Adcock, Thomas AA},
+  journal={Journal of Geophysical Research: Oceans},
+  volume={130},
+  number={12},
+  pages={e2025JC022758},
+  year={2025},
+  publisher={Wiley Online Library}
+}
+```
 # Commercialization Details:
 Commercial use requires a paid license. See LICENSE for details. Questions can be emailed to thomas.monahan@eng.ox.ac.uk
 
