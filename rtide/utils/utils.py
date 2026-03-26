@@ -37,10 +37,10 @@ def sind(x):
   return np.sin(np.deg2rad(x))
 
 def calc_stats(test_predictions, test_labels, verbose = True):
-  r2 = r2_score(test_predictions, test_labels)
+  r2 = r2_score(test_labels, test_predictions)
   mse = mean_squared_error(test_predictions, test_labels)
   mae = mean_absolute_error(test_predictions, test_labels)
-  mape = mean_absolute_percentage_error(test_predictions, test_labels)
+  mape = mean_absolute_percentage_error(test_labels, test_predictions)
 
   if verbose:
     print(f"r2: {r2} MSE: {mse} MAE : {mae} MAPE : {mape}")
