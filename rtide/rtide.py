@@ -1817,8 +1817,10 @@ class RTide:
         n_outputs = self.n_outputs
 
         test_X = dataset[:, n_outputs:num_features]
-        scaled_test_X = self.scaler_X.transform(test_X.reshape(-1, 1)).reshape(test_X.shape)
-
+        
+        #scaled_test_X = self.scaler_X.transform(test_X.reshape(-1, 1)).reshape(test_X.shape)
+        scaled_test_X = self._transform_X(test_X, featurewise=getattr(self, "featurewise_X_scaling", False))
+        
         # Check if model uses trend estimation
         trend = getattr(self, 'trend', None)
         
