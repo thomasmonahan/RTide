@@ -307,3 +307,77 @@ def test_b9_shap_analysis_uses_trained_scaling(featurewise):
     model.Shap_Analysis(plot=False)
     assert captured["featurewise"] is featurewise
     assert np.shape(model.shap_values)[0] == len(model.prediction_dfs.dropna())
+
+
+# ---------------------------------------------------------------------------
+# B11: tide-only prediction zeroes exactly the exogenous columns (behaviour change)
+# ---------------------------------------------------------------------------
+def _features(model):
+    df = model.prepped_dfs.dropna()
+    return df.to_numpy()[:, model.n_outputs:], [str(c) for c in df.columns[model.n_outputs:]]
+
+
+def _legacy_tide_only_X(model, X):
+    n_exog = len(model.exog_columns)
+    n_lagged_exog = 0 if model.multivariate_lags == [0] else n_exog * len(model.multivariate_lags)
+    X_tide = X.copy()
+    if n_exog > 0:
+        X_tide[:, 0:n_exog] = 0
+    if n_lagged_exog > 0:
+        X_tide[:, -n_lagged_exog:] = 0
+    return X_tide
+
+
+def _zeroed_columns(X_before, X_after):
+    changed = np.any(X_before != X_after, axis=0)
+    assert np.all(X_after[:, changed] == 0)
+    return [int(i) for i in np.flatnonzero(changed)]
+
+
+@pytest.mark.parametrize("n_exog", [1, 2])
+@pytest.mark.parametrize("self_prediction", [False, [-1, -2]], ids=["no-selfpred", "selfpred"])
+def test_b11_realtime_exog_zeroing_identical_to_legacy(n_exog, self_prediction):
+    model = RTide(elevation_df(n_exog=n_exog, seed=19), LAT, LON)
+    model.Prepare_Inputs(self_prediction=self_prediction, save=False)
+    X, columns = _features(model)
+
+    X_tide = model._tide_only_X(X, columns)
+    assert _zeroed_columns(X, X_tide) == list(range(n_exog))
+    np.testing.assert_array_equal(X_tide, _legacy_tide_only_X(model, X))
+
+
+@pytest.mark.parametrize(
+    "n_exog, mvl",
+    [(1, "standard"), (1, [-3, -2, -1]), (2, [-3, -2, -1]), (2, "standard")],
+    ids=["1exog-standard", "1exog-list", "2exog-list", "2exog-standard"],
+)
+@pytest.mark.parametrize("self_prediction", [False, [-1, -2]], ids=["no-selfpred", "selfpred"])
+def test_b11_lagged_exog_zeroes_only_exog_columns(n_exog, mvl, self_prediction):
+    model = RTide(elevation_df(periods=240, n_exog=n_exog, seed=20), LAT, LON)
+    model.Prepare_Inputs(multivariate_lags=mvl, self_prediction=self_prediction, save=False)
+    X, columns = _features(model)
+
+    exog_idx = [i for i, c in enumerate(columns)
+                if any(c == e or c.startswith(f"{e}_") for e in model.exog_columns)]
+    assert len(exog_idx) == n_exog * len(model.multivariate_lags)
+
+    X_tide = model._tide_only_X(X, columns)
+    assert _zeroed_columns(X, X_tide) == exog_idx
+    untouched = [i for i, c in enumerate(columns)
+                 if c.startswith(("Gravitational_", "Radiational_", "observations_"))]
+    assert len(untouched) == len(columns) - len(exog_idx)
+    np.testing.assert_array_equal(X_tide[:, untouched], X[:, untouched])
+    # The legacy slicing zeroed tidal forcing columns instead.
+    assert not np.array_equal(X_tide, _legacy_tide_only_X(model, X))
+
+
+def test_b11_train_uses_exact_exog_zeroing():
+    df = elevation_df(periods=240, n_exog=2, seed=21)
+    model = RTide(df, LAT, LON)
+    model.Prepare_Inputs(multivariate_lags=[-3, -2, -1], save=False)
+    model.Train(standard_epochs=2, verbose=False, save_weights=False)
+
+    X, columns = _features(model)
+    scaled = model._transform_X(model._tide_only_X(X, columns), featurewise=False)
+    expected = model.scaler_Y.inverse_transform(model.model.predict(scaled, verbose=0)).reshape(-1)
+    np.testing.assert_allclose(model.train_predictions["RTide_nomulti"], expected, rtol=1e-5)

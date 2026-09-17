@@ -926,7 +926,26 @@ class RTide:
             return self.scaler_X.transform(X)
         return self.scaler_X.transform(X.reshape(-1, 1)).reshape(X.shape)
 
-    def _compute_normalized_time(self, index: pd.DatetimeIndex, 
+    def _tide_only_X(self, X: np.ndarray, feature_columns) -> np.ndarray:
+        """
+        Copy of the raw (unscaled) feature matrix X with the exogenous input columns zeroed.
+
+        Exogenous columns are identified by the exact names Prepare_Inputs generates:
+        `col` (realtime) and f"{col}_{lag}" (lagged). Self-prediction columns are not zeroed.
+        """
+        exog_names = set()
+        for col in self.exog_columns:
+            exog_names.add(str(col))
+            for lag in self.multivariate_lags:
+                exog_names.add(f"{col}_{lag}")
+
+        X_tide = np.array(X, copy=True)
+        exog_idx = [i for i, name in enumerate(feature_columns) if str(name) in exog_names]
+        if exog_idx:
+            X_tide[:, exog_idx] = 0
+        return X_tide
+
+    def _compute_normalized_time(self, index: pd.DatetimeIndex,
                                   train_start: pd.Timestamp = None,
                                   train_end: pd.Timestamp = None) -> np.ndarray:
         """Compute normalized time values for trend estimation.
@@ -1249,20 +1268,8 @@ class RTide:
 
         # Pure-tide predictions by zeroing exogenous inputs (if present).
         if self.multi:
-            n_exog = len(self.exog_columns)
-            # if multivariate_lags == [0] then no lagged exog columns exist; keep logic but still compute rtide_noforcing
-            n_lagged_exog = 0 if self.multivariate_lags == [0] else n_exog * len(self.multivariate_lags)
-
-            # Build X_tide by copying train_X and zeroing exogenous columns
-            X_tide = train_X.copy()
-
-            # Zero realtime exogenous columns if present:
-            if n_exog > 0:
-                X_tide[:, 0:n_exog] = 0
-
-            # If there are lagged exogenous columns, zero those too by targeting the tail slice
-            if n_lagged_exog > 0:
-                X_tide[:, -n_lagged_exog:] = 0
+            # Build X_tide by copying train_X and zeroing exogenous columns (raw, unscaled space)
+            X_tide = self._tide_only_X(train_X, df.columns[n_outputs:])
 
             # Always scale / predict the tide-only input matrix (handles both realtime-only and lagged cases)
             scaled_X_tide = self._transform_X(X_tide, featurewise=featurewise_X_scaling)
