@@ -1,0 +1,98 @@
+"""Regression tests for the RTide 1.0.1 bug fixes (B1-B13)."""
+import numpy as np
+import pandas as pd
+import pytest
+
+from rtide import RTide
+
+LAT, LON = 44.9062, -66.996201
+
+
+def _index(periods, start="2024-01-01"):
+    # Explicit ns resolution: pandas 3 defaults to us, for which RTide infers sample_rate=1000.
+    return pd.date_range(start=start, periods=periods, freq="1h", tz="UTC").as_unit("ns")
+
+
+def _tide(t_hours, phase=0.0):
+    return (1.2 * np.cos(2 * np.pi * t_hours / 12.4206012 + phase)
+            + 0.3 * np.cos(2 * np.pi * t_hours / 23.93447213 + 2 * phase))
+
+
+def elevation_df(periods=168, n_exog=0, seed=0, start="2024-01-01"):
+    rng = np.random.default_rng(seed)
+    index = _index(periods, start)
+    t = np.arange(periods, dtype=np.float64)
+    data = {"observations": _tide(t, phase=seed) + 0.02 * rng.standard_normal(periods)}
+    for i in range(n_exog):
+        data[f"exog{i}"] = np.sin(2 * np.pi * t / (50.0 + 20 * i)) + 0.05 * rng.standard_normal(periods)
+        data["observations"] = data["observations"] + 0.1 * data[f"exog{i}"]
+    return pd.DataFrame(data, index=index)
+
+
+def currents_df(periods=168, seed=0, start="2024-01-01"):
+    rng = np.random.default_rng(seed)
+    t = np.arange(periods, dtype=np.float64)
+    return pd.DataFrame(
+        {"u": _tide(t, 0.3) + 0.02 * rng.standard_normal(periods),
+         "v": 0.5 * _tide(t, 1.1) + 0.02 * rng.standard_normal(periods)},
+        index=_index(periods, start),
+    )
+
+
+# ---------------------------------------------------------------------------
+# B1: feature cache must not be reused across different datasets / stations
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("difference", ["data", "latlon"])
+def test_b1_cache_not_reused_for_different_station(difference):
+    first = elevation_df(seed=1)
+    if difference == "data":
+        second, lat2, lon2 = elevation_df(seed=2), LAT, LON
+    else:
+        second, lat2, lon2 = first.copy(), LAT + 5.0, LON + 5.0
+
+    RTide(first, LAT, LON).Prepare_Inputs(verbose=False)
+    model = RTide(second, lat2, lon2)
+    model.Prepare_Inputs(verbose=False)
+
+    np.testing.assert_array_equal(model.prepped_dfs["observations"].to_numpy(), second["observations"].to_numpy())
+    if difference == "latlon":
+        fresh = RTide(second, lat2, lon2)
+        fresh.Prepare_Inputs(save=False)
+        np.testing.assert_allclose(model.prepped_dfs.to_numpy(float), fresh.prepped_dfs.to_numpy(float), rtol=1e-6)
+
+
+def test_b1_cache_reused_for_same_data(monkeypatch):
+    data = elevation_df(seed=3)
+    first = RTide(data, LAT, LON)
+    first.Prepare_Inputs(verbose=False)
+
+    def fail(*args, **kwargs):
+        raise AssertionError("features recomputed instead of loaded from cache")
+
+    monkeypatch.setattr(RTide, "_compute_global_tide_base", fail)
+    second = RTide(data, LAT, LON)
+    second.Prepare_Inputs(verbose=False)
+    # The CSV round trip of the legacy cache is not bit-exact in the last digit.
+    np.testing.assert_allclose(second.prepped_dfs["observations"].to_numpy(), data["observations"].to_numpy(),
+                               rtol=1e-12)
+    assert list(second.prepped_dfs.columns) == list(first.prepped_dfs.columns)
+
+
+def test_b1_cache_without_fingerprint_is_recomputed(tmp_path, monkeypatch):
+    data = elevation_df(seed=4)
+    RTide(data, LAT, LON).Prepare_Inputs(verbose=False)
+    sidecar = tmp_path / "rtide_saves" / "RTide_fingerprint.json"
+    assert sidecar.exists()
+    sidecar.unlink()  # simulate a cache written by 1.0.0
+
+    calls = []
+    original = RTide._compute_global_tide_base
+
+    def counting(self, *args, **kwargs):
+        calls.append(1)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(RTide, "_compute_global_tide_base", counting)
+    RTide(data, LAT, LON).Prepare_Inputs(verbose=False)
+    assert calls, "a cache without a fingerprint sidecar must be recomputed"
+    assert sidecar.exists()

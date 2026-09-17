@@ -589,6 +589,33 @@ class RTide:
         padded_df = padded_df.merge(self.ts, how="left", left_index=True, right_index=True)
         self.padded_ts = padded_df
 
+    def _inputs_fingerprint(self) -> str:
+        """
+        SHA-1 identifying the data a station-mode feature cache was built from:
+        ts index (int64 ns), column names, values, lat/lon, location_mode and resolved sample_rate.
+        """
+        h = hashlib.sha1()
+        index = pd.DatetimeIndex(self.ts.index)
+        h.update(np.ascontiguousarray(index.values.astype("datetime64[ns]").astype(np.int64)).tobytes())
+        h.update(json.dumps([str(c) for c in self.ts.columns]).encode("utf-8"))
+        try:
+            values = self.ts.to_numpy(dtype=np.float64, na_value=np.nan)
+        except (TypeError, ValueError):
+            values = None
+        if values is not None:
+            values = np.where(np.isnan(values), np.nan, values)  # normalise NaN payloads
+            h.update(np.ascontiguousarray(values).tobytes())
+        else:
+            h.update(pd.util.hash_pandas_object(self.ts, index=False).to_numpy().tobytes())
+        meta = {
+            "lat": float(self.lat),
+            "lon": float(self.lon),
+            "location_mode": self.location_mode,
+            "sample_rate": float(self.sample_rate),
+        }
+        h.update(json.dumps(meta, sort_keys=True).encode("utf-8"))
+        return h.hexdigest()
+
     # ----------------------------
     # Prepare Inputs
     # ----------------------------
@@ -746,7 +773,7 @@ class RTide:
         if (self.location_mode == "station") and save and (not prediction) and (not force_recompute):
             try:
                 csv_path = f"{self.path}_global_tide.csv"
-                pkl_path = f"{self.path}_inputs.pkl"
+                pkl_path = f"{self.path}_inputs.pickle"
 
                 prepped_dfs = pd.read_csv(csv_path, index_col=0)
                 prepped_dfs.index = pd.to_datetime(prepped_dfs.index)
@@ -754,6 +781,12 @@ class RTide:
 
                 if inputs_used != inputs:
                     raise ValueError("Inputs changed; recomputing.")
+
+                # A cache without a fingerprint sidecar (e.g. written by 1.0.0) counts as a mismatch.
+                with open(f"{self.path}_fingerprint.json", "r", encoding="utf-8") as f:
+                    cached_fingerprint = json.load(f).get("fingerprint")
+                if cached_fingerprint != self._inputs_fingerprint():
+                    raise ValueError("Cached features were built from different data; recomputing.")
 
                 self.prepped_dfs = prepped_dfs.reindex(self.ts.index)
                 loaded = True
@@ -837,8 +870,13 @@ class RTide:
             else:
                 self.prepped_dfs = prepped
                 if save and (self.location_mode == "station"):
+                    fingerprint_path = f"{self.path}_fingerprint.json"
+                    if os.path.exists(fingerprint_path):
+                        os.remove(fingerprint_path)  # never leave a sidecar describing an older CSV
                     self.prepped_dfs.to_csv(f"{self.path}_global_tide.csv")
                     save_inputs_to_pickle(inputs, self.path)
+                    with open(fingerprint_path, "w", encoding="utf-8") as f:
+                        json.dump({"fingerprint": self._inputs_fingerprint()}, f)
                 if save:
                     save_inputs_to_pickle(inputs, self.path)  # ✅ Always saved!
 
