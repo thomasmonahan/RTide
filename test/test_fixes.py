@@ -284,3 +284,26 @@ def test_b8_trend_model_reload_matches_in_session(trend, kind):
     fresh.Predict(df)
     assert fresh.trend == trend
     np.testing.assert_allclose(fresh.test_predictions["rtide_test"], model.test_predictions["rtide_test"], rtol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# B9: Shap_Analysis uses the scaling mode the model was trained with
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("featurewise", [False, True])
+def test_b9_shap_analysis_uses_trained_scaling(featurewise):
+    df = elevation_df(periods=40, seed=18)
+    model = _train_default(df, featurewise_scaling=featurewise)
+    assert model.featurewise_X_scaling is featurewise
+
+    captured = {}
+    original = model._transform_X
+
+    def spy(X, featurewise):
+        captured["featurewise"] = featurewise
+        return original(X, featurewise=featurewise)
+
+    model._transform_X = spy
+    model.Predict(df)
+    model.Shap_Analysis(plot=False)
+    assert captured["featurewise"] is featurewise
+    assert np.shape(model.shap_values)[0] == len(model.prediction_dfs.dropna())
