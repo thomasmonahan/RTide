@@ -266,3 +266,21 @@ def test_b7_never_raises_in_prediction_mode():
     model = RTide(df, LAT, LON)
     model.Prepare_Inputs(multivariate_lags=[-1000], prediction=True, save=False)
     assert model.prediction_dfs.dropna().empty
+
+
+# ---------------------------------------------------------------------------
+# B8: trend models can be saved and reloaded
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("kind", ["elevation", "currents"])
+@pytest.mark.parametrize("trend", ["linear", "quadratic"])
+def test_b8_trend_model_reload_matches_in_session(trend, kind):
+    df = elevation_df(seed=17) if kind == "elevation" else currents_df(seed=17)
+    model = _train_default(df, standard_epochs=1, trend=trend)
+    model.Predict(df)
+
+    fresh = RTide(df, LAT, LON)
+    fresh.path = "./rtide_saves/RTide"
+    fresh.Load_Model()
+    fresh.Predict(df)
+    assert fresh.trend == trend
+    np.testing.assert_allclose(fresh.test_predictions["rtide_test"], model.test_predictions["rtide_test"], rtol=1e-5)

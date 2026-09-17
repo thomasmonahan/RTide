@@ -113,7 +113,8 @@ class TrendLayer(Layer):
         super(TrendLayer, self).__init__(**kwargs)
         self.trend_type = trend_type
         self.n_outputs = n_outputs
-        self.initial_coeffs = initial_coeffs  # NEW parameter
+        # None on deserialisation: weights are restored from the saved file.
+        self.initial_coeffs = dict(initial_coeffs) if initial_coeffs else {}
         
         if trend_type not in ['linear', 'quadratic']:
             raise ValueError(f"trend_type must be 'linear' or 'quadratic', got {trend_type}")
