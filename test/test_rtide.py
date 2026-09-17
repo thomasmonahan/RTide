@@ -9,7 +9,7 @@ def sample_data():
     constit_freqs = [8.05114007e-02, 7.89992487e-02, 8.33333333e-02, 8.20235526e-02]
     amplitudes = [2.69536915e+00, 5.72051193e-01, 4.07506583e-01, 1.77388101e-01]
     phases = [100.17759146, 67.89243773, 139.00250991, 137.86574464]
-    times = pd.date_range(start='2024-01-01 00:00:00+00:00', periods=24*7, freq="1H", tz='UTC')
+    times = pd.date_range(start='2024-01-01 00:00:00+00:00', periods=24*7, freq="1h", tz='UTC')
     time_vals = times.to_julian_date().to_numpy()
     individual_tides = []
     for i, j in enumerate(constit_freqs):
@@ -24,7 +24,7 @@ def sample_data_multi():
     amplitudes = [2.69536915e+00, 5.72051193e-01, 4.07506583e-01, 1.77388101e-01]
     phases = [100.17759146, 67.89243773, 139.00250991, 137.86574464]
     
-    times = pd.date_range(start='2024-01-01 00:00:00+00:00', periods=24*7, freq="1H", tz='UTC')
+    times = pd.date_range(start='2024-01-01 00:00:00+00:00', periods=24*7, freq="1h", tz='UTC')
     time_vals = times.to_julian_date().to_numpy()
     multivar = time_vals * 2 * np.pi
     individual_tides = []
@@ -44,11 +44,11 @@ def test_rtide_init(sample_data):
     assert model.ts.equals(sample_data)
     assert model.lat == lat
     assert model.lon == lon
-    assert model.M_E == 5.9722*10**24
-    assert model.M_M == 7.3*10**22
-    assert model.M_S == 1.989*10**30
-    assert model.E_r == 6371.01*10**3
-    assert model.solar_constant == 1.946/100
+    assert model.M_E == pytest.approx(5.9722*10**24)
+    assert model.M_M == pytest.approx(7.3*10**22)
+    assert model.M_S == pytest.approx(1.989*10**30)
+    assert model.E_r == pytest.approx(6371.01*10**3)
+    assert model.solar_constant == pytest.approx(1.946/100)
     assert model.multi == False
 
 def test_rtide_init_multi(sample_data_multi):
@@ -61,25 +61,28 @@ def test_rtide_init_multi(sample_data_multi):
     assert model.ts.equals(sample_data_multi)
     assert model.lat == lat
     assert model.lon == lon
-    assert model.M_E == 5.9722*10**24
-    assert model.M_M == 7.3*10**22
-    assert model.M_S == 1.989*10**30
-    assert model.E_r == 6371.01*10**3
-    assert model.solar_constant == 1.946/100
+    assert model.M_E == pytest.approx(5.9722*10**24)
+    assert model.M_M == pytest.approx(7.3*10**22)
+    assert model.M_S == pytest.approx(1.989*10**30)
+    assert model.E_r == pytest.approx(6371.01*10**3)
+    assert model.solar_constant == pytest.approx(1.946/100)
     assert model.multi == True
 
 def test_rtide_init_ts_index(sample_data):
     """
-    Make sure that model only accepts pandas time-indexes
+    Make sure that model only accepts pandas time-indexes and numeric lat/lon
     """
     with pytest.raises(ValueError):
         bad_sample_data = sample_data.copy()
         bad_sample_data.index = range(len(sample_data))
         model = RTide(bad_sample_data, 44.9062, -66.996201)
-    lat = '44.9062'
     lon = -66.996201
     with pytest.raises(ValueError):
-        model = RTide(sample_data, lat, lon)
+        model = RTide(sample_data, 'abc', lon)
+    ## numeric strings are accepted and converted to float
+    model = RTide(sample_data, '44.9062', lon)
+    assert isinstance(model.lat, float)
+    assert model.lat == 44.9062
 
 def test_prep(sample_data):
     lat = 44.9062
@@ -195,7 +198,7 @@ def test_predict(sample_data):
     lon = -66.996201
     model = RTide(sample_data, lat, lon)
     model.Prepare_Inputs()
-    ### Condition where weights are loaded. 
+    model.Train(standard_epochs = 2)
     model.Predict(sample_data[:5])
     assert model.model is not None
     assert isinstance(model.test_prediction_df, pd.DataFrame)
@@ -214,7 +217,7 @@ def test_visualize_predictions(sample_data):
     model.Predict(sample_data[:5])
     model.Visualize_Predictions()
 
-def test_visualize_predictions(sample_data):
+def test_visualize_predictions_verbose(sample_data):
     """
     Test the visualize_predictions function
     """
