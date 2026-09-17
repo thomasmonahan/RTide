@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='rtide',  
-    version='1.0.0', 
+    version='1.0.1', 
     author='Thomas Monahan',
     author_email='thomas.monahan@eng.ox.ac.uk',
     description='RTide: A python implementation of the ML Response Framework for Tidal Analyis and Prediction',
@@ -20,6 +20,8 @@ setup(
         'skyfield',
         'shap',
         'matplotlib',
+        'scikit-learn',
+        'joblib',
     ],
     classifiers=[
         'Programming Language :: Python :: 3',
@@ -28,5 +30,5 @@ setup(
         'Intended Audience :: Science/Research',
         'Topic :: Scientific/Engineering :: Physics',
     ],
-    python_requires='>=3.6',
+    python_requires='>=3.9',
 )
