@@ -1,4 +1,5 @@
 import os
+import copy
 import json
 import hashlib
 import warnings
@@ -21,7 +22,7 @@ import shap
 
 from skyfield.api import load, wgs84
 
-from .utils import cosd, sind, custom_round, calc_stats, save_inputs_to_pickle, load_inputs_from_pickle, fit_trend_initial_coeffs
+from .utils import cosd, sind, custom_round, calc_stats, save_inputs_to_pickle, load_inputs_from_pickle, fit_trend_initial_coeffs, compute_ssp
 from .models import build_model, get_custom_objects
 from . import models
 
@@ -31,6 +32,17 @@ DEFAULT_INPUT_CONFIG = {
     "Radiational": {"degrees": [1, 2], "orders": {1: [1], 2: [1, 2]}},
     "Gravitational": {"degrees": [2, 3], "orders": {2: [1, 2], 3: [1, 2, 3]}},
 }
+
+# Prepare_Inputs settings remembered between calls on the same object (raw user-supplied values).
+_PREP_SETTING_KEYS = (
+    "uniform_lags",
+    "multivariate_lags",
+    "multivariate_realtime",
+    "self_prediction",
+    "radiational",
+    "symmetrical",
+    "path",
+)
 
 
 def _ensure_datetime_index(df: pd.DataFrame) -> pd.DataFrame:
@@ -564,7 +576,7 @@ class RTide:
                 #if self.multivariate_realtime and multivariate_lags == 'negative':
                 #    pass  # negative-only: do NOT add 0.0
                 #elif self.multivariate_realtime:
-                if 0.0 not in self.multivariate_lags and self.multivariate_realtime:
+                if 0.0 not in self.multivariate_lags and getattr(self, "multivariate_realtime", True):
                     self.multivariate_lags.insert(0, 0.0)
             else:
                 self.multivariate_lags = [0]
@@ -588,6 +600,33 @@ class RTide:
         padded_df = pd.DataFrame(index=combined)
         padded_df = padded_df.merge(self.ts, how="left", left_index=True, right_index=True)
         self.padded_ts = padded_df
+
+    def _inputs_fingerprint(self) -> str:
+        """
+        SHA-1 identifying the data a station-mode feature cache was built from:
+        ts index (int64 ns), column names, values, lat/lon, location_mode and resolved sample_rate.
+        """
+        h = hashlib.sha1()
+        index = pd.DatetimeIndex(self.ts.index)
+        h.update(np.ascontiguousarray(index.values.astype("datetime64[ns]").astype(np.int64)).tobytes())
+        h.update(json.dumps([str(c) for c in self.ts.columns]).encode("utf-8"))
+        try:
+            values = self.ts.to_numpy(dtype=np.float64, na_value=np.nan)
+        except (TypeError, ValueError):
+            values = None
+        if values is not None:
+            values = np.where(np.isnan(values), np.nan, values)  # normalise NaN payloads
+            h.update(np.ascontiguousarray(values).tobytes())
+        else:
+            h.update(pd.util.hash_pandas_object(self.ts, index=False).to_numpy().tobytes())
+        meta = {
+            "lat": float(self.lat),
+            "lon": float(self.lon),
+            "location_mode": self.location_mode,
+            "sample_rate": float(self.sample_rate),
+        }
+        h.update(json.dumps(meta, sort_keys=True).encode("utf-8"))
+        return h.hexdigest()
 
     # ----------------------------
     # Prepare Inputs
@@ -680,30 +719,35 @@ class RTide:
             self.precomputed_cache_dir = os.path.expanduser("~/.cache/rtide")
         
 
-        try:
-            # Local variables for backward compatibility with existing function logic
-            uniform_lags = self.uniform_lags
-            multivariate_lags = self.multivariate_lags
-            self_prediction = self.self_prediction
-            radiational = self.radiational
-            symmetrical = self.symmetrical
-            path = self.path
-        except:
-            self.uniform_lags = inputs["uniform_lags"]
-            self.multivariate_lags = inputs["multivariate_lags"]
-            self.self_prediction = inputs["self_prediction"]
-            self.radiational = inputs["radiational"]
-            self.symmetrical = inputs["symmetrical"]
-            self.path = inputs["path"]
-            self.multivariate_realtime = inputs["multivariate_realtime"]
+        # Preparation settings are driven by the raw user-supplied values, never by the processed
+        # self.multivariate_lags. Kwargs passed to this call override settings stored by a previous
+        # call; settings not passed keep their stored value (defaults on the first call).
+        stored_settings = getattr(self, "_prep_settings", None)
+        settings = {}
+        for key in _PREP_SETTING_KEYS:
+            if stored_settings is None or key in kwargs:
+                settings[key] = inputs[key]
+            else:
+                settings[key] = stored_settings[key]
+        self._prep_settings = copy.deepcopy(settings)
+        # Saved inputs (used by Predict and the cache check) describe the features actually built.
+        inputs.update(settings)
 
-            uniform_lags = self.uniform_lags
-            multivariate_lags = self.multivariate_lags
-            self_prediction = self.self_prediction
-            radiational = self.radiational
-            symmetrical = self.symmetrical
-            path = self.path
-            
+        self.uniform_lags = settings["uniform_lags"]
+        self.multivariate_lags = settings["multivariate_lags"]  # replaced by the processed list in Prep()
+        self.self_prediction = settings["self_prediction"]
+        self.radiational = settings["radiational"]
+        self.symmetrical = settings["symmetrical"]
+        self.path = settings["path"]
+        self.multivariate_realtime = settings["multivariate_realtime"]
+
+        uniform_lags = self.uniform_lags
+        multivariate_lags = self.multivariate_lags
+        self_prediction = self.self_prediction
+        radiational = self.radiational
+        symmetrical = self.symmetrical
+        path = self.path
+
         verbose = bool(inputs.get("verbose", True))
         force_recompute = bool(inputs.get("force_recompute", False))
 
@@ -746,7 +790,7 @@ class RTide:
         if (self.location_mode == "station") and save and (not prediction) and (not force_recompute):
             try:
                 csv_path = f"{self.path}_global_tide.csv"
-                pkl_path = f"{self.path}_inputs.pkl"
+                pkl_path = f"{self.path}_inputs.pickle"
 
                 prepped_dfs = pd.read_csv(csv_path, index_col=0)
                 prepped_dfs.index = pd.to_datetime(prepped_dfs.index)
@@ -754,6 +798,12 @@ class RTide:
 
                 if inputs_used != inputs:
                     raise ValueError("Inputs changed; recomputing.")
+
+                # A cache without a fingerprint sidecar (e.g. written by 1.0.0) counts as a mismatch.
+                with open(f"{self.path}_fingerprint.json", "r", encoding="utf-8") as f:
+                    cached_fingerprint = json.load(f).get("fingerprint")
+                if cached_fingerprint != self._inputs_fingerprint():
+                    raise ValueError("Cached features were built from different data; recomputing.")
 
                 self.prepped_dfs = prepped_dfs.reindex(self.ts.index)
                 loaded = True
@@ -836,9 +886,21 @@ class RTide:
                     prepped.to_csv(f"{self.path}_global_tide_prediction.csv")
             else:
                 self.prepped_dfs = prepped
+                if prepped.dropna().empty:
+                    raise ValueError(
+                        "No training rows have complete observations and features after preparing inputs "
+                        f"({len(prepped)} rows, {prepped.shape[1]} columns). This usually means lags "
+                        "(multivariate_lags, self_prediction, uniform_lags) are longer than the record, "
+                        "or the observations are all NaN."
+                    )
                 if save and (self.location_mode == "station"):
+                    fingerprint_path = f"{self.path}_fingerprint.json"
+                    if os.path.exists(fingerprint_path):
+                        os.remove(fingerprint_path)  # never leave a sidecar describing an older CSV
                     self.prepped_dfs.to_csv(f"{self.path}_global_tide.csv")
                     save_inputs_to_pickle(inputs, self.path)
+                    with open(fingerprint_path, "w", encoding="utf-8") as f:
+                        json.dump({"fingerprint": self._inputs_fingerprint()}, f)
                 if save:
                     save_inputs_to_pickle(inputs, self.path)  # ✅ Always saved!
 
@@ -864,7 +926,26 @@ class RTide:
             return self.scaler_X.transform(X)
         return self.scaler_X.transform(X.reshape(-1, 1)).reshape(X.shape)
 
-    def _compute_normalized_time(self, index: pd.DatetimeIndex, 
+    def _tide_only_X(self, X: np.ndarray, feature_columns) -> np.ndarray:
+        """
+        Copy of the raw (unscaled) feature matrix X with the exogenous input columns zeroed.
+
+        Exogenous columns are identified by the exact names Prepare_Inputs generates:
+        `col` (realtime) and f"{col}_{lag}" (lagged). Self-prediction columns are not zeroed.
+        """
+        exog_names = set()
+        for col in self.exog_columns:
+            exog_names.add(str(col))
+            for lag in self.multivariate_lags:
+                exog_names.add(f"{col}_{lag}")
+
+        X_tide = np.array(X, copy=True)
+        exog_idx = [i for i, name in enumerate(feature_columns) if str(name) in exog_names]
+        if exog_idx:
+            X_tide[:, exog_idx] = 0
+        return X_tide
+
+    def _compute_normalized_time(self, index: pd.DatetimeIndex,
                                   train_start: pd.Timestamp = None,
                                   train_end: pd.Timestamp = None) -> np.ndarray:
         """Compute normalized time values for trend estimation.
@@ -1012,6 +1093,23 @@ class RTide:
         early_stoppage = inputs['early_stoppage']
         save_weights = inputs['save_weights']
         featurewise_X_scaling = inputs.get('featurewise_scaling', False)
+        if 'featurewise_X_scaling' in kwargs:
+            # Deliberately NOT honoured in 1.0.x: doing so would change results for existing users.
+            if 'featurewise_scaling' not in kwargs:
+                warnings.warn(
+                    "Train(featurewise_X_scaling=...) is currently ignored; use featurewise_scaling=... . "
+                    "A future release will honour featurewise_X_scaling.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+            elif bool(kwargs['featurewise_X_scaling']) != bool(kwargs['featurewise_scaling']):
+                warnings.warn(
+                    "Train(featurewise_X_scaling=...) is currently ignored and differs from "
+                    "featurewise_scaling=...; featurewise_scaling is used. "
+                    "A future release will honour featurewise_X_scaling.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
         trend = inputs.get('trend', None)  # NEW
         
         # Store trend type for use in Predict
@@ -1187,20 +1285,8 @@ class RTide:
 
         # Pure-tide predictions by zeroing exogenous inputs (if present).
         if self.multi:
-            n_exog = len(self.exog_columns)
-            # if multivariate_lags == [0] then no lagged exog columns exist; keep logic but still compute rtide_noforcing
-            n_lagged_exog = 0 if self.multivariate_lags == [0] else n_exog * len(self.multivariate_lags)
-
-            # Build X_tide by copying train_X and zeroing exogenous columns
-            X_tide = train_X.copy()
-
-            # Zero realtime exogenous columns if present:
-            if n_exog > 0:
-                X_tide[:, 0:n_exog] = 0
-
-            # If there are lagged exogenous columns, zero those too by targeting the tail slice
-            if n_lagged_exog > 0:
-                X_tide[:, -n_lagged_exog:] = 0
+            # Build X_tide by copying train_X and zeroing exogenous columns (raw, unscaled space)
+            X_tide = self._tide_only_X(train_X, df.columns[n_outputs:])
 
             # Always scale / predict the tide-only input matrix (handles both realtime-only and lagged cases)
             scaled_X_tide = self._transform_X(X_tide, featurewise=featurewise_X_scaling)
@@ -1378,9 +1464,11 @@ class RTide:
         """
         if path is not None:
             self.path = path
+        custom_objects = get_custom_objects()
+        custom_objects["compute_ssp"] = compute_ssp
         self.model = tf.keras.models.load_model(
             f"{self.path}_model_weights.keras",
-            custom_objects=get_custom_objects(),
+            custom_objects=custom_objects,
         )
         try:
             self.scaler_X = joblib.load(f"{self.path}_scaler_X.save")
@@ -1399,6 +1487,18 @@ class RTide:
         except Exception:
             pass
         return self
+
+    def _ensure_model_loaded(self):
+        """If no model has been trained or loaded in this session, load the saved one via Load_Model()."""
+        if self.model is not None:
+            return
+        try:
+            self.Load_Model()
+        except Exception as exc:
+            raise RuntimeError(
+                f"No model has been trained or saved at {getattr(self, 'path', None)}."
+            ) from exc
+
     def Predict(self, df, featurewise_X_scaling = None):
         """
         Function to generate predictions using the learned model at associated times.
@@ -1440,21 +1540,8 @@ class RTide:
                 f"Prediction dataframe schema ({self.output_mode}) does not match model schema ({previous_mode})."
             )
 
-        try:
-            model = self.model
-        except Exception:
-            try:
-                custom_objects = models.get_custom_objects()
-                custom_objects['compute_ssp'] = compute_ssp
-                model = self.model = tf.keras.models.load_model(
-                f'{self.path}_model_weights.keras',
-                custom_objects=custom_objects,
-                compile=False,
-                )
-                self.scaler_X = joblib.load(f'{self.path}_scaler_X.save')
-                self.scaler_Y = joblib.load(f'{self.path}_scaler_Y.save')
-            except Exception:
-                raise print("No model has been trained or has been saved.")
+        self._ensure_model_loaded()
+        model = self.model
 
 
         # Reuse the exact Prepare_Inputs configuration used during training
@@ -1473,8 +1560,14 @@ class RTide:
         self.Prepare_Inputs(**train_inputs)
 
 
-        dfp = self.prediction_dfs.dropna()
-        
+        output_block = self.prediction_dfs.iloc[:, :self.n_outputs]
+        if output_block.isna().all().all():
+            # Pure forecast mode (all observations NaN): only the features decide which rows are usable.
+            feature_columns = list(self.prediction_dfs.columns[self.n_outputs:])
+            dfp = self.prediction_dfs.dropna(subset=feature_columns)
+        else:
+            dfp = self.prediction_dfs.dropna()
+
         dataset = dfp.values
         num_cols = dataset.shape[1]
         n_outputs = self.n_outputs
@@ -1790,24 +1883,10 @@ class RTide:
           held constant at the median value to isolate the effect of forcing features
           from the secular trend.
         """
-        try:
-            _ = self.model
-        except Exception:
-            try:
-                custom_objects = models.get_custom_objects()
-                custom_objects['compute_ssp'] = compute_ssp
-                self.model = tf.keras.models.load_model(
-                f'{self.path}_model_weights.keras',
-                custom_objects=custom_objects,
-                compile=False,
-                )
-                self.scaler_X = joblib.load(f'{self.path}_scaler_X.save')
-                self.scaler_Y = joblib.load(f'{self.path}_scaler_Y.save')
-            except Exception:
-                raise print("No model has been trained or has been saved.")
+        self._ensure_model_loaded()
 
         # Use whichever prepared dataframe exists.
-        if hasattr(self, 'prediction_dfs'):
+        if self.prediction_dfs is not None:
             df = self.prediction_dfs.dropna()
         else:
             df = self.prepped_dfs.dropna()
@@ -1817,7 +1896,7 @@ class RTide:
         n_outputs = self.n_outputs
 
         test_X = dataset[:, n_outputs:num_features]
-        scaled_test_X = self.scaler_X.transform(test_X.reshape(-1, 1)).reshape(test_X.shape)
+        scaled_test_X = self._transform_X(test_X, featurewise=self.featurewise_X_scaling)
 
         # Check if model uses trend estimation
         trend = getattr(self, 'trend', None)

@@ -1,0 +1,9 @@
+{
+  "featurewise_X_scaling": false,
+  "n_outputs": 2,
+  "output_columns": [
+    "u",
+    "v"
+  ],
+  "trend": null
+}

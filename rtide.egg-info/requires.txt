@@ -1,0 +1,10 @@
+numpy
+pandas
+tensorflow
+utide
+scipy
+skyfield
+shap
+matplotlib
+scikit-learn
+joblib

@@ -1,0 +1,8 @@
+{
+  "featurewise_X_scaling": true,
+  "n_outputs": 1,
+  "output_columns": [
+    "observations"
+  ],
+  "trend": null
+}
