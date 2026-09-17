@@ -144,7 +144,8 @@ def test_prep_multi(sample_data_multi):
     model = RTide(sample_data_multi, lat, lon)
     model.sample_rate = 1 ## function isn't supposed to be called in isolation so setting manually
     model.Prep(uniform, symmetrical, multivariate_lags)
-    assert model.multivariate_lags == [-21.3, 34.5]
+    ## realtime (0.0) is included by default, as in Prepare_Inputs
+    assert model.multivariate_lags == [0.0, -21.3, 34.5]
 
     uniform = False
     symmetrical = True

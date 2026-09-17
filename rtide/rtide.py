@@ -576,7 +576,7 @@ class RTide:
                 #if self.multivariate_realtime and multivariate_lags == 'negative':
                 #    pass  # negative-only: do NOT add 0.0
                 #elif self.multivariate_realtime:
-                if 0.0 not in self.multivariate_lags and self.multivariate_realtime:
+                if 0.0 not in self.multivariate_lags and getattr(self, "multivariate_realtime", True):
                     self.multivariate_lags.insert(0, 0.0)
             else:
                 self.multivariate_lags = [0]
