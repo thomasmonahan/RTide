@@ -22,7 +22,7 @@ import shap
 
 from skyfield.api import load, wgs84
 
-from .utils import cosd, sind, custom_round, calc_stats, save_inputs_to_pickle, load_inputs_from_pickle, fit_trend_initial_coeffs
+from .utils import cosd, sind, custom_round, calc_stats, save_inputs_to_pickle, load_inputs_from_pickle, fit_trend_initial_coeffs, compute_ssp
 from .models import build_model, get_custom_objects
 from . import models
 
@@ -1433,9 +1433,11 @@ class RTide:
         """
         if path is not None:
             self.path = path
+        custom_objects = get_custom_objects()
+        custom_objects["compute_ssp"] = compute_ssp
         self.model = tf.keras.models.load_model(
             f"{self.path}_model_weights.keras",
-            custom_objects=get_custom_objects(),
+            custom_objects=custom_objects,
         )
         try:
             self.scaler_X = joblib.load(f"{self.path}_scaler_X.save")

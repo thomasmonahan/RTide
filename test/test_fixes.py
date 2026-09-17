@@ -198,3 +198,19 @@ def test_b3_saved_inputs_describe_effective_settings():
     fresh = RTide(df, LAT, LON)
     fresh.Prepare_Inputs(**dict(saved, save=False, prediction=True))
     assert list(fresh.prediction_dfs.columns) == list(model.prepped_dfs.columns)
+
+
+# ---------------------------------------------------------------------------
+# B5: loss='SSP'
+# ---------------------------------------------------------------------------
+def test_b5_train_with_ssp_loss_and_reload():
+    df = elevation_df(seed=11)
+    model = _train_default(df, standard_epochs=1, loss="SSP")
+    assert model.model is not None
+
+    fresh = RTide(df, LAT, LON)
+    fresh.path = "./rtide_saves/RTide"
+    fresh.Load_Model()
+    fresh.Predict(df)
+    model.Predict(df)
+    np.testing.assert_allclose(fresh.test_predictions["rtide_test"], model.test_predictions["rtide_test"], rtol=1e-5)
