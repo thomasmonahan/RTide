@@ -381,3 +381,58 @@ def test_b11_train_uses_exact_exog_zeroing():
     scaled = model._transform_X(model._tide_only_X(X, columns), featurewise=False)
     expected = model.scaler_Y.inverse_transform(model.model.predict(scaled, verbose=0)).reshape(-1)
     np.testing.assert_allclose(model.train_predictions["RTide_nomulti"], expected, rtol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# B12: trend warm-start coefficients are used (behaviour change)
+# ---------------------------------------------------------------------------
+def _initial_trend_weights(trend, n_outputs, coeffs, architecture="response"):
+    from rtide import models
+
+    model = models.build_model(
+        architecture=architecture, input_dims=6, n_outputs=n_outputs, hidden_nodes=6, depth=2,
+        trend=trend, trend_initial_coeffs=coeffs,
+    )
+    layer = model.get_layer("trend_layer")
+    if trend == "linear":
+        return {"c1": layer.trend_weights.numpy(), "c0": layer.trend_bias.numpy()}
+    return {"c2": layer.trend_weights_quad.numpy(), "c1": layer.trend_weights_lin.numpy(),
+            "c0": layer.trend_bias.numpy()}
+
+
+@pytest.mark.parametrize("architecture", ["response", "siren"])
+@pytest.mark.parametrize("n_outputs", [1, 2])
+@pytest.mark.parametrize("trend", ["linear", "quadratic"])
+def test_b12_fitted_coefficients_initialise_trend_weights(trend, n_outputs, architecture):
+    rng = np.random.default_rng(22)
+    keys = ["c0", "c1"] + (["c2"] if trend == "quadratic" else [])
+    coeffs = {k: rng.normal(size=n_outputs).astype(np.float32) for k in keys}
+
+    weights = _initial_trend_weights(trend, n_outputs, coeffs, architecture)
+    assert set(weights) == set(keys)
+    for key in keys:
+        np.testing.assert_allclose(weights[key], coeffs[key], rtol=1e-6)
+
+
+@pytest.mark.parametrize("trend", ["linear", "quadratic"])
+def test_b12_legacy_coefficient_names_still_accepted(trend):
+    if trend == "linear":
+        legacy, expected = {"slope": [0.5, -0.25], "intercept": [1.5, 2.0]}, {"c1": [0.5, -0.25], "c0": [1.5, 2.0]}
+    else:
+        legacy = {"a": [0.1, 0.2], "b": [0.3, 0.4], "c": [0.5, 0.6]}
+        expected = {"c2": [0.1, 0.2], "c1": [0.3, 0.4], "c0": [0.5, 0.6]}
+    weights = _initial_trend_weights(trend, 2, {k: np.asarray(v, np.float32) for k, v in legacy.items()})
+    for key, value in expected.items():
+        np.testing.assert_allclose(weights[key], value, rtol=1e-6)
+
+
+def test_b12_fit_trend_initial_coeffs_round_trip():
+    from rtide.utils import fit_trend_initial_coeffs
+
+    t = np.linspace(0, 1, 50)
+    y = np.column_stack([0.3 + 1.2 * t - 0.7 * t**2, -0.1 + 0.4 * t + 0.2 * t**2])
+    coeffs = fit_trend_initial_coeffs(t_norm=t, y_scaled=y, trend="quadratic")
+    weights = _initial_trend_weights("quadratic", 2, coeffs)
+    np.testing.assert_allclose(weights["c0"], [0.3, -0.1], atol=1e-5)
+    np.testing.assert_allclose(weights["c1"], [1.2, 0.4], atol=1e-5)
+    np.testing.assert_allclose(weights["c2"], [-0.7, 0.2], atol=1e-5)

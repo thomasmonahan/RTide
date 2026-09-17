@@ -119,17 +119,28 @@ class TrendLayer(Layer):
         if trend_type not in ['linear', 'quadratic']:
             raise ValueError(f"trend_type must be 'linear' or 'quadratic', got {trend_type}")
     
+    def _initial_coeff(self, legacy_key, fitted_key):
+        """Initial value for a trend weight.
+
+        Accepts the legacy names (slope/intercept, a/b/c) and the keys returned by
+        fit_trend_initial_coeffs() for least squares on [1, t, t^2]: c0 (constant),
+        c1 (linear), c2 (quadratic). Legacy names take precedence if both are given.
+        """
+        if legacy_key in self.initial_coeffs:
+            return self.initial_coeffs[legacy_key]
+        return self.initial_coeffs.get(fitted_key, 0.0)
+
     def build(self, input_shape):
         # input_shape: (batch_size, 1) for time values
         if self.trend_type == 'linear':
             # y = a*t + b
-            slope_init = self.initial_coeffs.get('slope', 0.0)
+            slope_init = self._initial_coeff('slope', 'c1')
             self.trend_weights = self.add_weight(
                 initializer=tf.keras.initializers.Constant(slope_init),
                 shape=(self.n_outputs,),
                 trainable=True  # Still trainable - backprop refines it!
             )
-            bias_init = self.initial_coeffs.get('intercept', 0.0)
+            bias_init = self._initial_coeff('intercept', 'c0')
             self.trend_bias = self.add_weight(
                 name='linear_bias',
                 shape=(self.n_outputs,),
@@ -138,21 +149,21 @@ class TrendLayer(Layer):
             )
         else:  # quadratic
             # y = a*t^2 + b*t + c
-            a_init = self.initial_coeffs.get('a', 0.0)
+            a_init = self._initial_coeff('a', 'c2')
             self.trend_weights_quad = self.add_weight(
                 name='quadratic_coef',
                 shape=(self.n_outputs,),
                 initializer=tf.keras.initializers.Constant(a_init),
                 trainable=True
             )
-            b_init = self.initial_coeffs.get('b', 0.0)
+            b_init = self._initial_coeff('b', 'c1')
             self.trend_weights_lin = self.add_weight(
                 name='linear_coef',
                 shape=(self.n_outputs,),
                 initializer=tf.keras.initializers.Constant(b_init),
                 trainable=True
             )
-            c_init = self.initial_coeffs.get('c', 0.0)
+            c_init = self._initial_coeff('c', 'c0')
             self.trend_bias = self.add_weight(
                 name='constant_bias',
                 shape=(self.n_outputs,),
