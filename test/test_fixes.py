@@ -96,3 +96,49 @@ def test_b1_cache_without_fingerprint_is_recomputed(tmp_path, monkeypatch):
     RTide(data, LAT, LON).Prepare_Inputs(verbose=False)
     assert calls, "a cache without a fingerprint sidecar must be recomputed"
     assert sidecar.exists()
+
+
+# ---------------------------------------------------------------------------
+# B2: forecasting with all-NaN observations
+# ---------------------------------------------------------------------------
+def _train_default(df, **train_kwargs):
+    model = RTide(df, LAT, LON)
+    model.Prepare_Inputs(verbose=False)
+    model.Train(**{"standard_epochs": 2, "verbose": False, **train_kwargs})
+    return model
+
+
+def test_b2_pure_forecast_with_nan_observations():
+    full = elevation_df(periods=168 + 48, seed=5)
+    future = full.iloc[168:].copy()
+    future["observations"] = np.nan
+
+    model = _train_default(full.iloc[:168])
+    model.Predict(future)
+    assert len(model.test_prediction_df) == len(future.index)
+    assert np.isfinite(model.test_prediction_df["rtide"].to_numpy()).all()
+    assert np.size(model.test_predictions["test_observations"]) == 0
+
+    fresh = RTide(future, LAT, LON)
+    fresh.path = "./rtide_saves/RTide"
+    fresh.Load_Model()
+    fresh.Predict(future)
+    assert len(fresh.test_prediction_df) == len(future.index)
+    assert np.isfinite(fresh.test_prediction_df["rtide"].to_numpy()).all()
+    assert np.size(fresh.test_predictions["test_observations"]) == 0
+    np.testing.assert_allclose(fresh.test_predictions["rtide_test"], model.test_predictions["rtide_test"], rtol=1e-5)
+
+
+def test_b2_partial_nan_observations_unchanged():
+    full = elevation_df(periods=168 + 48, seed=6)
+    future = full.iloc[168:].copy()
+    nan_rows = [0, 5, 17]
+    future.iloc[nan_rows, 0] = np.nan
+
+    model = _train_default(full.iloc[:168])
+    model.Predict(future)
+
+    legacy = model.prediction_dfs.dropna()  # legacy row selection
+    assert len(legacy) == len(future) - len(nan_rows)
+    assert model.test_prediction_df.index.equals(legacy.index)
+    np.testing.assert_array_equal(model.test_predictions["test_observations"], legacy["observations"].to_numpy())

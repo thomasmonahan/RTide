@@ -1511,8 +1511,14 @@ class RTide:
         self.Prepare_Inputs(**train_inputs)
 
 
-        dfp = self.prediction_dfs.dropna()
-        
+        output_block = self.prediction_dfs.iloc[:, :self.n_outputs]
+        if output_block.isna().all().all():
+            # Pure forecast mode (all observations NaN): only the features decide which rows are usable.
+            feature_columns = list(self.prediction_dfs.columns[self.n_outputs:])
+            dfp = self.prediction_dfs.dropna(subset=feature_columns)
+        else:
+            dfp = self.prediction_dfs.dropna()
+
         dataset = dfp.values
         num_cols = dataset.shape[1]
         n_outputs = self.n_outputs
