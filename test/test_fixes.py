@@ -214,3 +214,38 @@ def test_b5_train_with_ssp_loss_and_reload():
     fresh.Predict(df)
     model.Predict(df)
     np.testing.assert_allclose(fresh.test_predictions["rtide_test"], model.test_predictions["rtide_test"], rtol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# B6: auto-load of a saved model in Predict / Shap_Analysis
+# ---------------------------------------------------------------------------
+def test_b6_predict_autoloads_saved_model():
+    df = elevation_df(seed=12)
+    trained = _train_default(df)
+    trained.Predict(df)
+
+    fresh = RTide(df, LAT, LON)
+    fresh.path = "./rtide_saves/RTide"
+    fresh.Predict(df)  # no Load_Model()
+    assert fresh.model is not None
+    np.testing.assert_allclose(fresh.test_predictions["rtide_test"], trained.test_predictions["rtide_test"], rtol=1e-5)
+
+
+def test_b6_predict_without_any_model_raises_runtime_error():
+    df = elevation_df(seed=13)
+    model = RTide(df, LAT, LON)
+    model.path = "./rtide_saves/does_not_exist"
+    with pytest.raises(RuntimeError, match="No model has been trained or saved at ./rtide_saves/does_not_exist"):
+        model.Predict(df)
+
+
+def test_b6_shap_analysis_autoloads_and_uses_prepped_dfs():
+    df = elevation_df(periods=40, seed=14)
+    _train_default(df)
+
+    fresh = RTide(df, LAT, LON)
+    fresh.Prepare_Inputs(save=False)  # prediction_dfs stays None
+    fresh.path = "./rtide_saves/RTide"
+    fresh.Shap_Analysis(plot=False)
+    assert fresh.model is not None
+    assert np.shape(fresh.shap_values)[0] == len(fresh.prepped_dfs.dropna())

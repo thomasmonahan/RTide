@@ -1456,6 +1456,18 @@ class RTide:
         except Exception:
             pass
         return self
+
+    def _ensure_model_loaded(self):
+        """If no model has been trained or loaded in this session, load the saved one via Load_Model()."""
+        if self.model is not None:
+            return
+        try:
+            self.Load_Model()
+        except Exception as exc:
+            raise RuntimeError(
+                f"No model has been trained or saved at {getattr(self, 'path', None)}."
+            ) from exc
+
     def Predict(self, df, featurewise_X_scaling = None):
         """
         Function to generate predictions using the learned model at associated times.
@@ -1497,21 +1509,8 @@ class RTide:
                 f"Prediction dataframe schema ({self.output_mode}) does not match model schema ({previous_mode})."
             )
 
-        try:
-            model = self.model
-        except Exception:
-            try:
-                custom_objects = models.get_custom_objects()
-                custom_objects['compute_ssp'] = compute_ssp
-                model = self.model = tf.keras.models.load_model(
-                f'{self.path}_model_weights.keras',
-                custom_objects=custom_objects,
-                compile=False,
-                )
-                self.scaler_X = joblib.load(f'{self.path}_scaler_X.save')
-                self.scaler_Y = joblib.load(f'{self.path}_scaler_Y.save')
-            except Exception:
-                raise print("No model has been trained or has been saved.")
+        self._ensure_model_loaded()
+        model = self.model
 
 
         # Reuse the exact Prepare_Inputs configuration used during training
@@ -1853,24 +1852,10 @@ class RTide:
           held constant at the median value to isolate the effect of forcing features
           from the secular trend.
         """
-        try:
-            _ = self.model
-        except Exception:
-            try:
-                custom_objects = models.get_custom_objects()
-                custom_objects['compute_ssp'] = compute_ssp
-                self.model = tf.keras.models.load_model(
-                f'{self.path}_model_weights.keras',
-                custom_objects=custom_objects,
-                compile=False,
-                )
-                self.scaler_X = joblib.load(f'{self.path}_scaler_X.save')
-                self.scaler_Y = joblib.load(f'{self.path}_scaler_Y.save')
-            except Exception:
-                raise print("No model has been trained or has been saved.")
+        self._ensure_model_loaded()
 
         # Use whichever prepared dataframe exists.
-        if hasattr(self, 'prediction_dfs'):
+        if self.prediction_dfs is not None:
             df = self.prediction_dfs.dropna()
         else:
             df = self.prepped_dfs.dropna()
