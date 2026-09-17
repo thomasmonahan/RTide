@@ -1093,6 +1093,23 @@ class RTide:
         early_stoppage = inputs['early_stoppage']
         save_weights = inputs['save_weights']
         featurewise_X_scaling = inputs.get('featurewise_scaling', False)
+        if 'featurewise_X_scaling' in kwargs:
+            # Deliberately NOT honoured in 1.0.x: doing so would change results for existing users.
+            if 'featurewise_scaling' not in kwargs:
+                warnings.warn(
+                    "Train(featurewise_X_scaling=...) is currently ignored; use featurewise_scaling=... . "
+                    "A future release will honour featurewise_X_scaling.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
+            elif bool(kwargs['featurewise_X_scaling']) != bool(kwargs['featurewise_scaling']):
+                warnings.warn(
+                    "Train(featurewise_X_scaling=...) is currently ignored and differs from "
+                    "featurewise_scaling=...; featurewise_scaling is used. "
+                    "A future release will honour featurewise_X_scaling.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
         trend = inputs.get('trend', None)  # NEW
         
         # Store trend type for use in Predict

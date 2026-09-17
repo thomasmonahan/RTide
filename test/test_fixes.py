@@ -436,3 +436,39 @@ def test_b12_fit_trend_initial_coeffs_round_trip():
     np.testing.assert_allclose(weights["c0"], [0.3, -0.1], atol=1e-5)
     np.testing.assert_allclose(weights["c1"], [1.2, 0.4], atol=1e-5)
     np.testing.assert_allclose(weights["c2"], [-0.7, 0.2], atol=1e-5)
+
+
+# ---------------------------------------------------------------------------
+# B13: Train(featurewise_X_scaling=...) warns but is still ignored
+# ---------------------------------------------------------------------------
+def _featurewise_x_warnings(record):
+    return [w for w in record if issubclass(w.category, FutureWarning) and "featurewise_X_scaling" in str(w.message)]
+
+
+def test_b13_featurewise_X_scaling_warns_and_is_ignored():
+    df = elevation_df(periods=40, seed=23)
+    with pytest.warns(FutureWarning, match=r"Train\(featurewise_X_scaling=\.\.\.\) is currently ignored; "
+                                           r"use featurewise_scaling=\.\.\. \. A future release will honour"):
+        model = _train_default(df, featurewise_X_scaling=True)
+    assert model.featurewise_X_scaling is False
+
+
+@pytest.mark.parametrize("x_value, value, expect_warning", [(True, True, False), (False, True, True), (True, False, True)])
+def test_b13_featurewise_scaling_wins_when_both_given(x_value, value, expect_warning):
+    import warnings
+
+    df = elevation_df(periods=40, seed=24)
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        model = _train_default(df, featurewise_X_scaling=x_value, featurewise_scaling=value)
+    assert model.featurewise_X_scaling is value
+    assert bool(_featurewise_x_warnings(record)) is expect_warning
+
+
+def test_b13_no_warning_without_featurewise_X_scaling():
+    import warnings
+
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        _train_default(elevation_df(periods=40, seed=25), featurewise_scaling=True)
+    assert not _featurewise_x_warnings(record)
