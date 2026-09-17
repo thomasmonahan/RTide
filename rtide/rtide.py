@@ -886,6 +886,13 @@ class RTide:
                     prepped.to_csv(f"{self.path}_global_tide_prediction.csv")
             else:
                 self.prepped_dfs = prepped
+                if prepped.dropna().empty:
+                    raise ValueError(
+                        "No training rows have complete observations and features after preparing inputs "
+                        f"({len(prepped)} rows, {prepped.shape[1]} columns). This usually means lags "
+                        "(multivariate_lags, self_prediction, uniform_lags) are longer than the record, "
+                        "or the observations are all NaN."
+                    )
                 if save and (self.location_mode == "station"):
                     fingerprint_path = f"{self.path}_fingerprint.json"
                     if os.path.exists(fingerprint_path):

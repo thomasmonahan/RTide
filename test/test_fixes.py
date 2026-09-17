@@ -249,3 +249,20 @@ def test_b6_shap_analysis_autoloads_and_uses_prepped_dfs():
     fresh.Shap_Analysis(plot=False)
     assert fresh.model is not None
     assert np.shape(fresh.shap_values)[0] == len(fresh.prepped_dfs.dropna())
+
+
+# ---------------------------------------------------------------------------
+# B7: training frame with zero usable rows
+# ---------------------------------------------------------------------------
+def test_b7_no_usable_training_rows_raises(tmp_path):
+    model = RTide(elevation_df(n_exog=1, seed=15), LAT, LON)
+    with pytest.raises(ValueError, match="No training rows have complete observations and features"):
+        model.Prepare_Inputs(multivariate_lags=[-1000], verbose=False)
+    assert not (tmp_path / "rtide_saves" / "RTide_global_tide.csv").exists()
+
+
+def test_b7_never_raises_in_prediction_mode():
+    df = elevation_df(n_exog=1, seed=16)
+    model = RTide(df, LAT, LON)
+    model.Prepare_Inputs(multivariate_lags=[-1000], prediction=True, save=False)
+    assert model.prediction_dfs.dropna().empty
