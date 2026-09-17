@@ -142,3 +142,59 @@ def test_b2_partial_nan_observations_unchanged():
     assert len(legacy) == len(future) - len(nan_rows)
     assert model.test_prediction_df.index.equals(legacy.index)
     np.testing.assert_array_equal(model.test_predictions["test_observations"], legacy["observations"].to_numpy())
+
+
+# ---------------------------------------------------------------------------
+# B3: repeat Prepare_Inputs / Predict on the same object uses the raw settings
+# ---------------------------------------------------------------------------
+MULTIVARIATE_LAG_MODES = [False, "standard", "negative", "all", [-3, -2, -1]]
+
+
+@pytest.mark.parametrize("repeat_kwargs", [True, False], ids=["kwargs-repeated", "kwargs-omitted"])
+@pytest.mark.parametrize("mvl", MULTIVARIATE_LAG_MODES, ids=str)
+def test_b3_prediction_columns_match_training(mvl, repeat_kwargs):
+    df = elevation_df(periods=240, n_exog=1, seed=7)
+    model = RTide(df, LAT, LON)
+    model.Prepare_Inputs(multivariate_lags=mvl, save=False)
+    train_columns = list(model.prepped_dfs.columns)
+    processed_lags = list(model.multivariate_lags)
+
+    second_kwargs = {"multivariate_lags": mvl} if repeat_kwargs else {}
+    model.Prepare_Inputs(prediction=True, save=False, **second_kwargs)
+    assert list(model.prediction_dfs.columns) == train_columns
+    assert list(model.multivariate_lags) == processed_lags  # public attribute still holds the processed list
+
+
+def test_b3_train_and_predict_same_object_standard_lags():
+    df = elevation_df(periods=240, n_exog=1, seed=8)
+    model = RTide(df, LAT, LON)
+    model.Prepare_Inputs(multivariate_lags="standard", verbose=False)
+    model.Train(standard_epochs=2, verbose=False)
+    model.Predict(df)
+    assert list(model.prediction_dfs.columns) == list(model.prepped_dfs.columns)
+    assert np.isfinite(model.test_predictions["rtide_test"]).all()
+
+
+def test_b3_explicit_kwargs_override_stored_settings():
+    model = RTide(elevation_df(seed=9), LAT, LON)
+    model.Prepare_Inputs(symmetrical=False, save=False)
+    n_asymmetric = model.prepped_dfs.shape[1]
+    model.Prepare_Inputs(symmetrical=True, save=False)
+    assert model.prepped_dfs.shape[1] != n_asymmetric
+
+
+def test_b3_saved_inputs_describe_effective_settings():
+    from rtide.utils import load_inputs_from_pickle
+
+    df = elevation_df(seed=10)
+    model = RTide(df, LAT, LON)
+    model.Prepare_Inputs(symmetrical=True, verbose=False)
+    model.Prepare_Inputs(uniform_lags=[3, 1], verbose=False)  # symmetrical not passed: stays True
+
+    saved = load_inputs_from_pickle(model.path)
+    assert saved["symmetrical"] is True
+    assert saved["uniform_lags"] == [3, 1]
+
+    fresh = RTide(df, LAT, LON)
+    fresh.Prepare_Inputs(**dict(saved, save=False, prediction=True))
+    assert list(fresh.prediction_dfs.columns) == list(model.prepped_dfs.columns)

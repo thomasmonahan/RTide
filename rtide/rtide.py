@@ -1,4 +1,5 @@
 import os
+import copy
 import json
 import hashlib
 import warnings
@@ -31,6 +32,17 @@ DEFAULT_INPUT_CONFIG = {
     "Radiational": {"degrees": [1, 2], "orders": {1: [1], 2: [1, 2]}},
     "Gravitational": {"degrees": [2, 3], "orders": {2: [1, 2], 3: [1, 2, 3]}},
 }
+
+# Prepare_Inputs settings remembered between calls on the same object (raw user-supplied values).
+_PREP_SETTING_KEYS = (
+    "uniform_lags",
+    "multivariate_lags",
+    "multivariate_realtime",
+    "self_prediction",
+    "radiational",
+    "symmetrical",
+    "path",
+)
 
 
 def _ensure_datetime_index(df: pd.DataFrame) -> pd.DataFrame:
@@ -707,30 +719,35 @@ class RTide:
             self.precomputed_cache_dir = os.path.expanduser("~/.cache/rtide")
         
 
-        try:
-            # Local variables for backward compatibility with existing function logic
-            uniform_lags = self.uniform_lags
-            multivariate_lags = self.multivariate_lags
-            self_prediction = self.self_prediction
-            radiational = self.radiational
-            symmetrical = self.symmetrical
-            path = self.path
-        except:
-            self.uniform_lags = inputs["uniform_lags"]
-            self.multivariate_lags = inputs["multivariate_lags"]
-            self.self_prediction = inputs["self_prediction"]
-            self.radiational = inputs["radiational"]
-            self.symmetrical = inputs["symmetrical"]
-            self.path = inputs["path"]
-            self.multivariate_realtime = inputs["multivariate_realtime"]
+        # Preparation settings are driven by the raw user-supplied values, never by the processed
+        # self.multivariate_lags. Kwargs passed to this call override settings stored by a previous
+        # call; settings not passed keep their stored value (defaults on the first call).
+        stored_settings = getattr(self, "_prep_settings", None)
+        settings = {}
+        for key in _PREP_SETTING_KEYS:
+            if stored_settings is None or key in kwargs:
+                settings[key] = inputs[key]
+            else:
+                settings[key] = stored_settings[key]
+        self._prep_settings = copy.deepcopy(settings)
+        # Saved inputs (used by Predict and the cache check) describe the features actually built.
+        inputs.update(settings)
 
-            uniform_lags = self.uniform_lags
-            multivariate_lags = self.multivariate_lags
-            self_prediction = self.self_prediction
-            radiational = self.radiational
-            symmetrical = self.symmetrical
-            path = self.path
-            
+        self.uniform_lags = settings["uniform_lags"]
+        self.multivariate_lags = settings["multivariate_lags"]  # replaced by the processed list in Prep()
+        self.self_prediction = settings["self_prediction"]
+        self.radiational = settings["radiational"]
+        self.symmetrical = settings["symmetrical"]
+        self.path = settings["path"]
+        self.multivariate_realtime = settings["multivariate_realtime"]
+
+        uniform_lags = self.uniform_lags
+        multivariate_lags = self.multivariate_lags
+        self_prediction = self.self_prediction
+        radiational = self.radiational
+        symmetrical = self.symmetrical
+        path = self.path
+
         verbose = bool(inputs.get("verbose", True))
         force_recompute = bool(inputs.get("force_recompute", False))
 
